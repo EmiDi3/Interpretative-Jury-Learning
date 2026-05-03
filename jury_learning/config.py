@@ -13,7 +13,8 @@ class RunConfig:
     scenarios_csv: str = "unique_scenarios.csv"
     model_path: str = "moral_jury_dcn_model.pth"
 
-    # Optional: extract SQLite DB from a zip before running (e.g. Colab drive path).
+    # Optional: extract SQLite DB from a zip before running (programmatic; Colab users may prefer
+    # the Drive + zip cell in 00_run_all.ipynb and set db_path to the extracted .db).
     extract_db_zip: Optional[str] = None
     extract_db_zip_dest: str = "."
 

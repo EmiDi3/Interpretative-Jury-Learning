@@ -14,6 +14,34 @@ from torch.utils.data import DataLoader, Dataset
 
 from jury_learning.config import RunConfig
 
+_REQUIRED_MM_TABLES = ("survey", "responses")
+
+
+def _ensure_db_file_exists(db_path: str) -> None:
+    """SQLite opens a new empty database when the path is missing; avoid that confusing failure mode."""
+    if not Path(db_path).is_file():
+        raise FileNotFoundError(
+            f"SQLite database not found at {db_path!s}. "
+            "If the path is wrong, SQLite creates an empty file with no tables, which then fails "
+            "with errors like 'no such table: survey'. "
+            "Download the Moral Machine SQLite export (with tables survey and responses), "
+            "point RunConfig.db_path at it, or set extract_db_zip / extract_db_zip_dest."
+        )
+
+
+def _require_sqlite_tables(conn: sqlite3.Connection, required: tuple[str, ...]) -> None:
+    rows = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%'"
+    ).fetchall()
+    present = {str(r[0]).lower() for r in rows}
+    missing = [t for t in required if t.lower() not in present]
+    if missing:
+        raise ValueError(
+            f"Database is missing required table(s): {missing}. "
+            f"Found: {sorted(present)}. "
+            "This code expects the MIT Moral Machine SQLite schema (tables `survey` and `responses`)."
+        )
+
 
 def extract_db_if_needed(cfg: RunConfig) -> None:
     if not cfg.extract_db_zip:
@@ -26,7 +54,9 @@ def extract_db_if_needed(cfg: RunConfig) -> None:
 
 
 def take_scenario_data_sql(db_path: str, output_file_path: str, *, verbose: bool = True) -> pd.DataFrame:
+    _ensure_db_file_exists(db_path)
     conn = sqlite3.connect(db_path)
+    _require_sqlite_tables(conn, _REQUIRED_MM_TABLES)
 
     character_cols = [
         "PedPed",
@@ -82,7 +112,9 @@ def take_scenario_data_sql(db_path: str, output_file_path: str, *, verbose: bool
 def merge_and_process_moral_data_sql(
     db_path: str, subset_size: int, *, verbose: bool = True
 ) -> tuple[pd.DataFrame, dict]:
+    _ensure_db_file_exists(db_path)
     conn = sqlite3.connect(db_path)
+    _require_sqlite_tables(conn, _REQUIRED_MM_TABLES)
 
     character_cols = [
         "NumberOfCharacters",
