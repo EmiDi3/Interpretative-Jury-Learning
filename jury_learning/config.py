@@ -18,7 +18,7 @@ class RunConfig:
     extract_db_zip_dest: str = "."
 
     # --- Data ---
-    sql_subset_size: int = 100_000
+    sql_subset_size: int = 100000
     batch_size: int = 1024
     eval_batch_size: int = 64
     random_seed: int = 42
@@ -46,7 +46,9 @@ class RunConfig:
     lr_phase2: float = 1e-4
     freeze_encoder_epoch_fraction: float = 2 / 3
 
-    # --- Experiment tracking ---
+    # --- Logging ---
+    verbose: bool = True
+    show_progress_bar: bool = False
     use_wandb: bool = False
     wandb_project: str = "moral-jury-model-training"
 
@@ -57,14 +59,3 @@ class RunConfig:
     export_unique_scenarios: bool = False
     run_training_stage: bool = True
     run_evaluation_stage: bool = True
-    plot_generalization: bool = True
-    plot_country_continent: bool = True
-    country_plot_focus: tuple[str, ...] = (
-        "CHN",
-        "USA",
-        "CAN",
-        "DEU",
-        "FRA",
-        "GBR",
-        "BRA",
-    )

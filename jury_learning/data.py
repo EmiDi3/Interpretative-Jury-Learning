@@ -25,7 +25,7 @@ def extract_db_if_needed(cfg: RunConfig) -> None:
         zf.extractall(dest)
 
 
-def take_scenario_data_sql(db_path: str, output_file_path: str) -> pd.DataFrame:
+def take_scenario_data_sql(db_path: str, output_file_path: str, *, verbose: bool = True) -> pd.DataFrame:
     conn = sqlite3.connect(db_path)
 
     character_cols = [
@@ -70,15 +70,18 @@ def take_scenario_data_sql(db_path: str, output_file_path: str) -> pd.DataFrame:
     scenario_description_cols = [col for col in df_final.columns if col.startswith(("Stay_", "Swerve_"))]
     df_unique_scenarios = df_final.drop_duplicates(subset=scenario_description_cols).reset_index(drop=True)
     df_unique_scenarios.to_csv(output_file_path, index=False)
-    print(f"Unique character scenarios saved to {output_file_path}")
-    print(
-        f"Successfully processed and saved {len(df_unique_scenarios)} unique paired scenarios "
-        "with only character features."
-    )
+    if verbose:
+        print(f"Unique character scenarios saved to {output_file_path}")
+        print(
+            f"Successfully processed and saved {len(df_unique_scenarios)} unique paired scenarios "
+            "with only character features."
+        )
     return df_unique_scenarios
 
 
-def merge_and_process_moral_data_sql(db_path: str, subset_size: int) -> tuple[pd.DataFrame, dict]:
+def merge_and_process_moral_data_sql(
+    db_path: str, subset_size: int, *, verbose: bool = True
+) -> tuple[pd.DataFrame, dict]:
     conn = sqlite3.connect(db_path)
 
     character_cols = [
@@ -108,7 +111,8 @@ def merge_and_process_moral_data_sql(db_path: str, subset_size: int) -> tuple[pd
         "Cat",
     ]
 
-    print(f"Querying and pairing up to {subset_size} survey rows...")
+    if verbose:
+        print(f"Querying and pairing up to {subset_size} survey rows...")
     sql_query = f"""
     SELECT
         s.ResponseID,
@@ -190,7 +194,8 @@ def merge_and_process_moral_data_sql(db_path: str, subset_size: int) -> tuple[pd
 
     df_final[group_fts] = df_final[group_fts].astype(float)
 
-    print(f"Successfully processed {len(df_final)} paired scenarios.")
+    if verbose:
+        print(f"Successfully processed {len(df_final)} paired scenarios.")
     return df_final, feature_dict
 
 
@@ -244,13 +249,14 @@ def create_isolated_test_sets(df: pd.DataFrame, feature_dict: dict, cfg: RunConf
     combined_mask = (df_new_users[rare_chars] > 0).any(axis=1)
     df_combined = df_new_users[combined_mask].copy()
 
-    print("--- Data Split Summary ---")
-    print(f"Train:         {len(df_train_final)}")
-    print(f"Val:           {len(df_val)}")
-    print(f"New Users:     {len(df_new_users)}")
-    print(f"New Scenarios: {len(df_new_scenarios)}")
-    print(f"New Groups:    {len(df_new_groups)}")
-    print(f"Combined Test: {len(df_combined)}")
+    if cfg.verbose:
+        print("--- Data split sizes ---")
+        print(f"Train:         {len(df_train_final)}")
+        print(f"Val:           {len(df_val)}")
+        print(f"New Users:     {len(df_new_users)}")
+        print(f"New Scenarios: {len(df_new_scenarios)}")
+        print(f"New Groups:    {len(df_new_groups)}")
+        print(f"Combined Test: {len(df_combined)}")
 
     return df_train_final, df_val, df_new_users, df_new_scenarios, df_new_groups, df_combined
 
@@ -301,9 +307,11 @@ def build_data_bundle(cfg: RunConfig) -> DataBundle:
     extract_db_if_needed(cfg)
 
     if cfg.export_unique_scenarios:
-        take_scenario_data_sql(cfg.db_path, cfg.scenarios_csv)
+        take_scenario_data_sql(cfg.db_path, cfg.scenarios_csv, verbose=cfg.verbose)
 
-    df_processed, feature_dict = merge_and_process_moral_data_sql(cfg.db_path, cfg.sql_subset_size)
+    df_processed, feature_dict = merge_and_process_moral_data_sql(
+        cfg.db_path, cfg.sql_subset_size, verbose=cfg.verbose
+    )
 
     splits = create_isolated_test_sets(df_processed, feature_dict, cfg)
     df_train, df_val, df_new_users, df_new_scenarios, df_new_groups, df_combined = splits

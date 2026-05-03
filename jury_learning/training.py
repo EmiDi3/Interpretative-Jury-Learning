@@ -1,15 +1,54 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from tqdm import tqdm
 
 from jury_learning.config import RunConfig
 from jury_learning.data import DataBundle
 from jury_learning.model import MoralJuryDCN
+
+
+@dataclass
+class TrainingHistory:
+    """Per-epoch training and validation metrics (accuracies are fractions in [0, 1])."""
+
+    epoch: list[int] = field(default_factory=list)
+    train_loss: list[float] = field(default_factory=list)
+    train_accuracy: list[float] = field(default_factory=list)
+    val_loss: list[float] = field(default_factory=list)
+    val_accuracy: list[float] = field(default_factory=list)
+    learning_rate: list[float] = field(default_factory=list)
+
+    def to_dataframe(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "epoch": self.epoch,
+                "train_loss": self.train_loss,
+                "train_accuracy": self.train_accuracy,
+                "val_loss": self.val_loss,
+                "val_accuracy": self.val_accuracy,
+                "learning_rate": self.learning_rate,
+            }
+        )
+
+    def last(self) -> dict[str, float]:
+        """Metrics from the final epoch."""
+        if not self.epoch:
+            return {}
+        i = -1
+        return {
+            "epoch": int(self.epoch[i]),
+            "train_loss": self.train_loss[i],
+            "train_accuracy": self.train_accuracy[i],
+            "val_loss": self.val_loss[i],
+            "val_accuracy": self.val_accuracy[i],
+            "learning_rate": self.learning_rate[i],
+        }
 
 
 def resolve_device(cfg: RunConfig) -> torch.device:
@@ -39,7 +78,20 @@ def build_model(cfg: RunConfig, bundle: DataBundle) -> MoralJuryDCN:
     )
 
 
-def train_moral_model(cfg: RunConfig, model: MoralJuryDCN, bundle: DataBundle, device: torch.device) -> MoralJuryDCN:
+def _maybe_tqdm(iterable, *, enabled: bool, **kwargs):
+    if not enabled:
+        return iterable
+    from tqdm import tqdm
+
+    return tqdm(iterable, **kwargs)
+
+
+def train_moral_model(
+    cfg: RunConfig,
+    model: MoralJuryDCN,
+    bundle: DataBundle,
+    device: torch.device,
+) -> tuple[MoralJuryDCN, TrainingHistory]:
     wandb_run = None
     if cfg.use_wandb:
         import wandb
@@ -54,10 +106,12 @@ def train_moral_model(cfg: RunConfig, model: MoralJuryDCN, bundle: DataBundle, d
     train_loader = bundle.train_loader
     val_loader = bundle.val_loader
     freeze_epoch = int(cfg.epochs * cfg.freeze_encoder_epoch_fraction)
+    history = TrainingHistory()
 
     for epoch in range(cfg.epochs):
         if epoch == freeze_epoch:
-            print("--- Phase 2: freezing response encoder, lowering LR ---")
+            if cfg.verbose:
+                print("Phase 2: freezing response encoder, lowering LR.")
             for param in model.response_encoder.parameters():
                 param.requires_grad = False
             for g in optimizer.param_groups:
@@ -68,8 +122,13 @@ def train_moral_model(cfg: RunConfig, model: MoralJuryDCN, bundle: DataBundle, d
         correct = 0
         total = 0
 
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{cfg.epochs}", leave=False)
-        for batch in pbar:
+        batches = _maybe_tqdm(
+            train_loader,
+            enabled=cfg.show_progress_bar,
+            desc=f"Epoch {epoch + 1}/{cfg.epochs}",
+            leave=False,
+        )
+        for batch in batches:
             response_fts = batch["response_features"].to(device)
             labels = batch["label"].to(device)
             user_ids = batch["ann_id"].to(device)
@@ -85,7 +144,6 @@ def train_moral_model(cfg: RunConfig, model: MoralJuryDCN, bundle: DataBundle, d
             predictions = (outputs > 0.5).float()
             correct += (predictions == labels).sum().item()
             total += labels.size(0)
-            pbar.set_postfix(loss=loss.item())
 
         model.eval()
         val_loss = 0.0
@@ -104,17 +162,28 @@ def train_moral_model(cfg: RunConfig, model: MoralJuryDCN, bundle: DataBundle, d
                 val_total += labels.size(0)
                 val_loss += criterion(outputs, labels).item()
 
-        epoch_train_loss = train_loss / max(len(train_loader), 1)
-        epoch_train_acc = 100 * correct / max(total, 1)
-        epoch_val_loss = val_loss / max(len(val_loader), 1)
-        epoch_val_acc = 100 * val_correct / max(val_total, 1)
+        n_train = max(len(train_loader), 1)
+        n_val = max(len(val_loader), 1)
+        epoch_train_loss = train_loss / n_train
+        epoch_train_acc = correct / max(total, 1)
+        epoch_val_loss = val_loss / n_val
+        epoch_val_acc = val_correct / max(val_total, 1)
+        lr = optimizer.param_groups[0]["lr"]
 
-        wandb_msg = f" | wandb: {wandb_run.name}" if wandb_run is not None else ""
-        print(
-            f"Epoch {epoch + 1}/{cfg.epochs} | "
-            f"Loss: {epoch_train_loss:.4f} | Acc: {epoch_train_acc:.2f}% | "
-            f"Val Loss: {epoch_val_loss:.4f} | Val Acc: {epoch_val_acc:.2f}%{wandb_msg}"
-        )
+        history.epoch.append(epoch + 1)
+        history.train_loss.append(epoch_train_loss)
+        history.train_accuracy.append(epoch_train_acc)
+        history.val_loss.append(epoch_val_loss)
+        history.val_accuracy.append(epoch_val_acc)
+        history.learning_rate.append(lr)
+
+        if cfg.verbose:
+            wandb_msg = f" | wandb={wandb_run.name}" if wandb_run is not None else ""
+            print(
+                f"Epoch {epoch + 1}/{cfg.epochs} | "
+                f"train_loss={epoch_train_loss:.4f} train_acc={epoch_train_acc:.4f} | "
+                f"val_loss={epoch_val_loss:.4f} val_acc={epoch_val_acc:.4f}{wandb_msg}"
+            )
 
         if cfg.use_wandb:
             import wandb
@@ -126,11 +195,12 @@ def train_moral_model(cfg: RunConfig, model: MoralJuryDCN, bundle: DataBundle, d
                     "train_accuracy": epoch_train_acc,
                     "val_loss": epoch_val_loss,
                     "val_accuracy": epoch_val_acc,
-                    "learning_rate": optimizer.param_groups[0]["lr"],
+                    "learning_rate": lr,
                 }
             )
 
-    print("Training complete.")
+    if cfg.verbose:
+        print("Training complete.")
     if cfg.use_wandb:
         import wandb
 
@@ -139,6 +209,7 @@ def train_moral_model(cfg: RunConfig, model: MoralJuryDCN, bundle: DataBundle, d
     out_path = Path(cfg.model_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), out_path)
-    print(f"Saved model weights to {out_path.resolve()}")
+    if cfg.verbose:
+        print(f"Saved weights to {out_path.resolve()}")
 
-    return model
+    return model, history
