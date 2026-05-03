@@ -19,6 +19,7 @@ import torch.nn as nn
 import sqlite3
 import pandas as pd
 
+
 # ===== Cell 1 (code) =====
 def take_scenario_data_sql(db_path, output_file_path):
     conn = sqlite3.connect(db_path)
