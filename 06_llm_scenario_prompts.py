@@ -61,7 +61,10 @@ def _describe_group(row: pd.Series, prefix: str) -> tuple[str, str]:
         full_col = f"{prefix}_{col}"
         if full_col not in row.index:
             continue
-        count = int(row[full_col])
+        val = row[full_col]
+        if pd.isna(val):
+            continue
+        count = int(float(val))
         if count == 1:
             parts.append(f"1 {singular}")
         elif count > 1:
@@ -110,13 +113,46 @@ def row_to_prompt(row: pd.Series) -> str:
 # Main
 # ---------------------------------------------------------------------------
 
+def _load_scenarios(input_path: str, db_path: str) -> pd.DataFrame:
+    """Load unique scenarios from CSV, generating it from the DB if the CSV doesn't exist."""
+    if Path(input_path).is_file():
+        df = pd.read_csv(input_path)
+        print(f"Loaded {len(df):,} unique scenarios from {input_path}")
+        return df
+
+    if not db_path:
+        raise FileNotFoundError(
+            f"{input_path!r} not found. Either generate it with take_scenario_data_sql "
+            "or pass --db-path to generate it now."
+        )
+
+    print(f"{input_path!r} not found — generating from {db_path!r} ...")
+    from jury_learning.data import take_scenario_data_sql
+    df = take_scenario_data_sql(db_path, input_path)
+    print(f"Generated and saved {len(df):,} unique scenarios to {input_path}")
+    return df
+
+
+def _validate_columns(df: pd.DataFrame) -> None:
+    """Warn if expected character columns are missing — helps catch column-name mismatches."""
+    expected = {f"{p}_{c}" for p in ("Stay", "Swerve") for c in _CHAR_LABELS}
+    missing = expected - set(df.columns)
+    if missing:
+        sample = sorted(missing)[:6]
+        raise ValueError(
+            f"CSV is missing {len(missing)} expected character columns (e.g. {sample}). "
+            f"Actual columns: {sorted(df.columns)[:10]} ..."
+        )
+
+
 def build_prompt_dataset(
     input_path: str,
     n: int,
     seed: int,
+    db_path: str = "",
 ) -> pd.DataFrame:
-    df = pd.read_csv(input_path)
-    print(f"Loaded {len(df):,} unique scenarios from {input_path}")
+    df = _load_scenarios(input_path, db_path)
+    _validate_columns(df)
 
     n = min(n, len(df))
     df_sample = df.sample(n=n, random_state=seed).reset_index(drop=True)
@@ -129,13 +165,14 @@ def build_prompt_dataset(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build LLM prompts from unique Moral Machine scenarios")
-    parser.add_argument("--input",  default="unique_scenarios.csv", help="Path to unique_scenarios.csv")
-    parser.add_argument("--n",      type=int, default=10000,        help="Number of scenarios to sample")
-    parser.add_argument("--output", default="llm_prompts.csv",      help="Output CSV path")
-    parser.add_argument("--seed",   type=int, default=42,           help="Random seed")
+    parser.add_argument("--input",   default="unique_scenarios.csv", help="Path to unique_scenarios.csv")
+    parser.add_argument("--db-path", default="moral_machine.db",     help="SQLite DB to generate the CSV from if it doesn't exist")
+    parser.add_argument("--n",       type=int, default=10000,        help="Number of scenarios to sample")
+    parser.add_argument("--output",  default="llm_prompts.csv",      help="Output CSV path")
+    parser.add_argument("--seed",    type=int, default=42,           help="Random seed")
     args = parser.parse_args()
 
-    df_out = build_prompt_dataset(args.input, n=args.n, seed=args.seed)
+    df_out = build_prompt_dataset(args.input, n=args.n, seed=args.seed, db_path=args.db_path)
 
     out_path = Path(args.output)
     df_out.to_csv(out_path, index=False)
