@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import gc
 import sqlite3
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -268,7 +270,8 @@ def create_isolated_test_sets(df: pd.DataFrame, feature_dict: dict, cfg: RunConf
         "Review_political",
         "Review_religious",
     ] + country_cols
-    group_key = df_train_pool[demographic_cols].astype(str).agg("-".join, axis=1)
+    # Use integer group IDs instead of string concatenation to avoid a memory spike
+    group_key = df_train_pool.groupby(demographic_cols, sort=False).ngroup()
 
     gss = GroupShuffleSplit(n_splits=1, test_size=cfg.new_groups_holdout_fraction, random_state=rs)
     train_idx, holdout_idx = next(gss.split(df_train_pool, groups=group_key))
@@ -329,7 +332,7 @@ def assign_unseen_user_id(df: pd.DataFrame, train_user_ids: set, unseen_id: int 
 
 @dataclass
 class DataBundle:
-    df_processed: pd.DataFrame
+    df_processed: Optional[pd.DataFrame]
     feature_dict: dict
     df_train: pd.DataFrame
     df_val: pd.DataFrame
@@ -352,7 +355,13 @@ def build_data_bundle(cfg: RunConfig) -> DataBundle:
         cfg.db_path, cfg.sql_subset_size, verbose=cfg.verbose
     )
 
+    num_users_for_embedding = int(df_processed["UserID"].max()) + 1
     splits = create_isolated_test_sets(df_processed, feature_dict, cfg)
+
+    # Free the full DataFrame immediately — splits hold the only data we need
+    del df_processed
+    gc.collect()
+
     df_train, df_val, df_new_users, df_new_scenarios, df_new_groups, df_combined = splits
 
     train_user_ids = set(df_train["UserID"].unique())
@@ -364,8 +373,6 @@ def build_data_bundle(cfg: RunConfig) -> DataBundle:
     df_new_groups = assign_unseen_user_id(df_new_groups, train_user_ids, unseen_id)
     df_combined = assign_unseen_user_id(df_combined, train_user_ids, unseen_id)
 
-    num_users_for_embedding = int(df_processed["UserID"].max()) + 1
-
     train_ds = MoralJuryDataset(df_train, feature_dict)
     val_ds = MoralJuryDataset(df_val, feature_dict)
 
@@ -373,7 +380,7 @@ def build_data_bundle(cfg: RunConfig) -> DataBundle:
     val_loader = DataLoader(val_ds, batch_size=cfg.batch_size, shuffle=False)
 
     return DataBundle(
-        df_processed=df_processed,
+        df_processed=None,
         feature_dict=feature_dict,
         df_train=df_train,
         df_val=df_val,
