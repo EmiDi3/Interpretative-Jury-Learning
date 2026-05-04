@@ -9,8 +9,9 @@ import torch.nn as nn
 import torch.optim as optim
 
 from jury_learning.config import RunConfig
-from jury_learning.data import DataBundle
+from jury_learning.data import DataBundle, MoralJuryDataset
 from jury_learning.model import MoralJuryDCN, MoralJuryDCNBaseline
+from torch.utils.data import DataLoader
 
 
 @dataclass
@@ -22,6 +23,10 @@ class TrainingHistory:
     train_accuracy: list[float] = field(default_factory=list)
     val_loss: list[float] = field(default_factory=list)
     val_accuracy: list[float] = field(default_factory=list)
+    new_users_accuracy: list[float] = field(default_factory=list)
+    new_scenarios_accuracy: list[float] = field(default_factory=list)
+    new_groups_accuracy: list[float] = field(default_factory=list)
+    combined_accuracy: list[float] = field(default_factory=list)
     learning_rate: list[float] = field(default_factory=list)
 
     def to_dataframe(self) -> pd.DataFrame:
@@ -32,6 +37,10 @@ class TrainingHistory:
                 "train_accuracy": self.train_accuracy,
                 "val_loss": self.val_loss,
                 "val_accuracy": self.val_accuracy,
+                "new_users_accuracy": self.new_users_accuracy,
+                "new_scenarios_accuracy": self.new_scenarios_accuracy,
+                "new_groups_accuracy": self.new_groups_accuracy,
+                "combined_accuracy": self.combined_accuracy,
                 "learning_rate": self.learning_rate,
             }
         )
@@ -47,6 +56,10 @@ class TrainingHistory:
             "train_accuracy": self.train_accuracy[i],
             "val_loss": self.val_loss[i],
             "val_accuracy": self.val_accuracy[i],
+            "new_users_accuracy": self.new_users_accuracy[i],
+            "new_scenarios_accuracy": self.new_scenarios_accuracy[i],
+            "new_groups_accuracy": self.new_groups_accuracy[i],
+            "combined_accuracy": self.combined_accuracy[i],
             "learning_rate": self.learning_rate[i],
         }
 
@@ -114,6 +127,23 @@ def train_moral_model(
 
     train_loader = bundle.train_loader
     val_loader = bundle.val_loader
+
+    # Build eval loaders for held-out splits (created once, reused every epoch)
+    _eval_splits = {
+        "new_users":    bundle.df_new_users,
+        "new_scenarios": bundle.df_new_scenarios,
+        "new_groups":   bundle.df_new_groups,
+        "combined":     bundle.df_combined,
+    }
+    _eval_loaders = {
+        name: DataLoader(
+            MoralJuryDataset(df, bundle.feature_dict),
+            batch_size=cfg.eval_batch_size,
+            shuffle=False,
+        )
+        for name, df in _eval_splits.items()
+    }
+
     freeze_epoch = int(cfg.epochs * cfg.freeze_encoder_epoch_fraction)
     history = TrainingHistory()
 
@@ -179,11 +209,31 @@ def train_moral_model(
         epoch_val_acc = val_correct / max(val_total, 1)
         lr = optimizer.param_groups[0]["lr"]
 
+        # Evaluate on all held-out splits
+        split_accs: dict[str, float] = {}
+        with torch.no_grad():
+            for name, loader in _eval_loaders.items():
+                s_correct = 0
+                s_total = 0
+                for batch in loader:
+                    response_fts = batch["response_features"].to(device)
+                    labels = batch["label"].to(device)
+                    user_ids = batch["ann_id"].to(device)
+                    group_fts = batch["group_features"].to(device)
+                    outputs = model(response_fts, user_ids, group_fts).squeeze()
+                    s_correct += ((outputs > 0.5).float() == labels).sum().item()
+                    s_total += labels.size(0)
+                split_accs[name] = s_correct / max(s_total, 1)
+
         history.epoch.append(epoch + 1)
         history.train_loss.append(epoch_train_loss)
         history.train_accuracy.append(epoch_train_acc)
         history.val_loss.append(epoch_val_loss)
         history.val_accuracy.append(epoch_val_acc)
+        history.new_users_accuracy.append(split_accs["new_users"])
+        history.new_scenarios_accuracy.append(split_accs["new_scenarios"])
+        history.new_groups_accuracy.append(split_accs["new_groups"])
+        history.combined_accuracy.append(split_accs["combined"])
         history.learning_rate.append(lr)
 
         if cfg.verbose:
@@ -191,7 +241,11 @@ def train_moral_model(
             print(
                 f"Epoch {epoch + 1}/{cfg.epochs} | "
                 f"train_loss={epoch_train_loss:.4f} train_acc={epoch_train_acc:.4f} | "
-                f"val_loss={epoch_val_loss:.4f} val_acc={epoch_val_acc:.4f}{wandb_msg}"
+                f"val={epoch_val_acc:.4f} "
+                f"new_users={split_accs['new_users']:.4f} "
+                f"new_scenarios={split_accs['new_scenarios']:.4f} "
+                f"new_groups={split_accs['new_groups']:.4f} "
+                f"combined={split_accs['combined']:.4f}{wandb_msg}"
             )
 
         if cfg.use_wandb:
@@ -204,6 +258,10 @@ def train_moral_model(
                     "train_accuracy": epoch_train_acc,
                     "val_loss": epoch_val_loss,
                     "val_accuracy": epoch_val_acc,
+                    "new_users_accuracy": split_accs["new_users"],
+                    "new_scenarios_accuracy": split_accs["new_scenarios"],
+                    "new_groups_accuracy": split_accs["new_groups"],
+                    "combined_accuracy": split_accs["combined"],
                     "learning_rate": lr,
                 }
             )
