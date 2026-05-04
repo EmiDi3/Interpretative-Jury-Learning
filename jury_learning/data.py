@@ -110,7 +110,7 @@ def take_scenario_data_sql(db_path: str, output_file_path: str, *, verbose: bool
 
 
 def merge_and_process_moral_data_sql(
-    db_path: str, subset_size: int, *, verbose: bool = True
+    db_path: str, subset_size: int | None, *, verbose: bool = True
 ) -> tuple[pd.DataFrame, dict]:
     _ensure_db_file_exists(db_path)
     conn = sqlite3.connect(db_path)
@@ -144,7 +144,9 @@ def merge_and_process_moral_data_sql(
     ]
 
     if verbose:
-        print(f"Querying and pairing up to {subset_size} survey rows...")
+        label = f"up to {subset_size}" if subset_size is not None else "all"
+        print(f"Querying and pairing {label} survey rows...")
+    survey_source = f"(SELECT * FROM survey LIMIT {subset_size})" if subset_size is not None else "survey"
     sql_query = f"""
     SELECT
         s.ResponseID,
@@ -154,7 +156,7 @@ def merge_and_process_moral_data_sql(
         {", ".join([f"r0.{c} AS Stay_{c}" for c in character_cols])},
         r1.Saved AS Swerve_Saved,
         {", ".join([f"r1.{c} AS Swerve_{c}" for c in character_cols])}
-    FROM (SELECT * FROM survey LIMIT {subset_size}) s
+    FROM {survey_source} s
     JOIN responses r0 ON s.ResponseID = r0.ResponseID AND r0.Intervention = 0
     JOIN responses r1 ON s.ResponseID = r1.ResponseID AND r1.Intervention = 1
     """

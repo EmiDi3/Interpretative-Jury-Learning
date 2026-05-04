@@ -19,7 +19,7 @@ class RunConfig:
     extract_db_zip_dest: str = "."
 
     # --- Data ---
-    sql_subset_size: int = 100000
+    sql_subset_size: Optional[int] = 100000  # set to None to load the full dataset
     batch_size: int = 1024
     eval_batch_size: int = 64
     random_seed: int = 42
