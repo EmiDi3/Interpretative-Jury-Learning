@@ -351,22 +351,69 @@ def build_data_bundle(cfg: RunConfig) -> DataBundle:
     if cfg.export_unique_scenarios:
         take_scenario_data_sql(cfg.db_path, cfg.scenarios_csv, verbose=cfg.verbose)
 
-    df_processed, feature_dict = merge_and_process_moral_data_sql(
+    df, feature_dict = merge_and_process_moral_data_sql(
         cfg.db_path, cfg.sql_subset_size, verbose=cfg.verbose
     )
 
-    num_users_for_embedding = int(df_processed["UserID"].max()) + 1
-    splits = create_isolated_test_sets(df_processed, feature_dict, cfg)
+    num_users_for_embedding = int(df["UserID"].max()) + 1
+    rs = cfg.random_seed
+    rare_chars = list(cfg.rare_scenario_columns)
 
-    # Free the full DataFrame immediately — splits hold the only data we need
-    del df_processed
+    # User split — free the full df as soon as the two pools exist
+    unique_users = df["UserID"].unique()
+    train_u, test_u = train_test_split(
+        unique_users, test_size=cfg.new_users_holdout_fraction, random_state=rs
+    )
+    df_new_users = df[df["UserID"].isin(test_u)].copy()
+    df_train_pool = df[df["UserID"].isin(train_u)].copy()
+    del df
     gc.collect()
 
-    df_train, df_val, df_new_users, df_new_scenarios, df_new_groups, df_combined = splits
+    # New-scenarios split
+    missing = [c for c in rare_chars if c not in df_train_pool.columns]
+    if missing:
+        raise ValueError(f"Rare scenario columns not in dataframe: {missing}")
+    scenario_mask = (df_train_pool[rare_chars] > 0).any(axis=1)
+    df_new_scenarios = df_train_pool[scenario_mask].copy()
+    df_train_pool = df_train_pool[~scenario_mask].reset_index(drop=True)
+    gc.collect()
+
+    # New-groups split
+    country_cols = [col for col in df_train_pool.columns if col.startswith("Cnt_")]
+    demographic_cols = [
+        "Review_age", "Review_education", "Review_income",
+        "Review_political", "Review_religious",
+    ] + country_cols
+    group_key = df_train_pool.groupby(demographic_cols, sort=False).ngroup()
+    gss = GroupShuffleSplit(n_splits=1, test_size=cfg.new_groups_holdout_fraction, random_state=rs)
+    _, holdout_idx = next(gss.split(df_train_pool, groups=group_key))
+    del group_key
+    group_mask = np.zeros(len(df_train_pool), dtype=bool)
+    group_mask[holdout_idx] = True
+    df_new_groups = df_train_pool[group_mask].copy()
+    df_train_pool = df_train_pool[~group_mask].reset_index(drop=True)
+    gc.collect()
+
+    # Train / val split
+    df_train, df_val = train_test_split(df_train_pool, test_size=cfg.val_fraction, random_state=rs)
+    del df_train_pool
+    gc.collect()
+
+    # Combined test set (new users who encountered rare scenarios)
+    combined_mask = (df_new_users[rare_chars] > 0).any(axis=1)
+    df_combined = df_new_users[combined_mask].copy()
+
+    if cfg.verbose:
+        print("--- Data split sizes ---")
+        print(f"Train:         {len(df_train)}")
+        print(f"Val:           {len(df_val)}")
+        print(f"New Users:     {len(df_new_users)}")
+        print(f"New Scenarios: {len(df_new_scenarios)}")
+        print(f"New Groups:    {len(df_new_groups)}")
+        print(f"Combined Test: {len(df_combined)}")
 
     train_user_ids = set(df_train["UserID"].unique())
     unseen_id = 0
-
     df_val = assign_unseen_user_id(df_val, train_user_ids, unseen_id)
     df_new_users = assign_unseen_user_id(df_new_users, train_user_ids, unseen_id)
     df_new_scenarios = assign_unseen_user_id(df_new_scenarios, train_user_ids, unseen_id)
