@@ -10,7 +10,7 @@ import torch.optim as optim
 
 from jury_learning.config import RunConfig
 from jury_learning.data import DataBundle
-from jury_learning.model import MoralJuryDCN
+from jury_learning.model import MoralJuryDCN, MoralJuryDCNBaseline
 
 
 @dataclass
@@ -65,10 +65,19 @@ def resolve_device(cfg: RunConfig) -> torch.device:
     return torch.device("cpu")
 
 
-def build_model(cfg: RunConfig, bundle: DataBundle) -> MoralJuryDCN:
+def build_model(cfg: RunConfig, bundle: DataBundle) -> MoralJuryDCN | MoralJuryDCNBaseline:
     fd = bundle.feature_dict
-    return MoralJuryDCN(
-        num_users=bundle.num_users_for_embedding,
+    if cfg.use_user_embedding:
+        return MoralJuryDCN(
+            num_users=bundle.num_users_for_embedding,
+            num_response_features=len(fd["response_fts"]),
+            num_group_features=len(fd["group_fts"]),
+            embed_dim=cfg.embed_dim,
+            hidden_dim=cfg.hidden_dim,
+            num_cross_layers=cfg.num_cross_layers,
+            response_encoder_hidden=cfg.response_encoder_hidden,
+        )
+    return MoralJuryDCNBaseline(
         num_response_features=len(fd["response_fts"]),
         num_group_features=len(fd["group_fts"]),
         embed_dim=cfg.embed_dim,

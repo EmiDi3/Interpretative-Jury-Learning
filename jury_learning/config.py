@@ -40,6 +40,7 @@ class RunConfig:
     hidden_dim: int = 512
     num_cross_layers: int = 3
     response_encoder_hidden: int = 64
+    use_user_embedding: bool = True  # set False for the no-user-ID baseline
 
     # --- Training ---
     epochs: int = 50
