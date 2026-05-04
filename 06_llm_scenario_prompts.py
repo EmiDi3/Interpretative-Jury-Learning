@@ -113,11 +113,30 @@ def row_to_prompt(row: pd.Series) -> str:
 # Main
 # ---------------------------------------------------------------------------
 
+_CHARACTER_COLS = [
+    "PedPed", "Barrier", "NumberOfCharacters", "CrossingSignal",
+    "Man", "Woman", "Pregnant", "Stroller", "OldMan", "OldWoman",
+    "Boy", "Girl", "Homeless", "LargeWoman", "LargeMan", "Criminal",
+    "MaleExecutive", "FemaleExecutive", "FemaleAthlete", "MaleAthlete",
+    "FemaleDoctor", "MaleDoctor", "Dog", "Cat",
+]
+_EXPECTED_COLUMNS = (
+    [f"Stay_{c}" for c in _CHARACTER_COLS] +
+    [f"Swerve_{c}" for c in _CHARACTER_COLS]
+)  # 48 columns
+
+
 def _load_scenarios(input_path: str, db_path: str) -> pd.DataFrame:
     """Load unique scenarios from CSV, generating it from the DB if the CSV doesn't exist."""
     if Path(input_path).is_file():
         df = pd.read_csv(input_path)
-        print(f"Loaded {len(df):,} unique scenarios from {input_path}")
+        # If the CSV has no header, the first data row becomes column names
+        # (looks like '0', '0.0', '0.0.1', ...). Detect and fix this.
+        if df.columns[0] not in ("Stay_PedPed",) and len(df.columns) == len(_EXPECTED_COLUMNS):
+            df = pd.read_csv(input_path, header=None, names=_EXPECTED_COLUMNS)
+            print(f"Loaded {len(df):,} unique scenarios from {input_path} (no-header CSV, assigned column names)")
+        else:
+            print(f"Loaded {len(df):,} unique scenarios from {input_path}")
         return df
 
     if not db_path:
