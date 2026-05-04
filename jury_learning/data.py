@@ -164,15 +164,20 @@ def merge_and_process_moral_data_sql(
     df_final = pd.read_sql_query(sql_query, conn)
     conn.close()
 
+    # Downcast binary character columns to int8 (they are 0/1) to save memory
+    binary_cols = [f"Stay_{c}" for c in character_cols] + [f"Swerve_{c}" for c in character_cols]
+    df_final[binary_cols] = df_final[binary_cols].astype(np.int8)
+    df_final["Swerve_Saved"] = df_final["Swerve_Saved"].astype(np.int8)
+
     user_encoder = LabelEncoder()
     df_final["UserID"] = user_encoder.fit_transform(df_final["UserID"]) + 1
 
-    df_final["Decision_Swerve"] = df_final["Swerve_Saved"].astype(int)
+    df_final["Decision_Swerve"] = df_final["Swerve_Saved"].astype(np.int8)
 
     df_final["Review_age"] = pd.to_numeric(df_final["Review_age"], errors="coerce")
     df_final["Review_age"] = df_final["Review_age"].fillna(df_final["Review_age"].median())
     df_final["Review_age"] = df_final["Review_age"].clip(18, 75)
-    df_final["Review_age"] = (df_final["Review_age"] - 18) / (75 - 18)
+    df_final["Review_age"] = ((df_final["Review_age"] - 18) / (75 - 18)).astype(np.float32)
 
     edu_map = {
         "underHigh": 0.1,
@@ -184,7 +189,7 @@ def merge_and_process_moral_data_sql(
         "other": 0.5,
         "default": 0.5,
     }
-    df_final["Review_education"] = df_final["Review_education"].map(edu_map).fillna(0.5)
+    df_final["Review_education"] = df_final["Review_education"].map(edu_map).fillna(0.5).astype(np.float32)
 
     income_map = {
         "under5000": 0.1,
@@ -198,12 +203,12 @@ def merge_and_process_moral_data_sql(
         "above100000": 1.0,
         "default": 0.5,
     }
-    df_final["Review_income"] = df_final["Review_income"].map(income_map).fillna(0.5)
-    df_final["Review_political"] = pd.to_numeric(df_final["Review_political"], errors="coerce").fillna(0.5)
-    df_final["Review_religious"] = pd.to_numeric(df_final["Review_religious"], errors="coerce").fillna(0.5)
+    df_final["Review_income"] = df_final["Review_income"].map(income_map).fillna(0.5).astype(np.float32)
+    df_final["Review_political"] = pd.to_numeric(df_final["Review_political"], errors="coerce").fillna(0.5).astype(np.float32)
+    df_final["Review_religious"] = pd.to_numeric(df_final["Review_religious"], errors="coerce").fillna(0.5).astype(np.float32)
 
     categorical_cols = ["Review_gender", "UserCountry3"]
-    df_final = pd.get_dummies(df_final, columns=categorical_cols, prefix=["Gen", "Cnt"])
+    df_final = pd.get_dummies(df_final, columns=categorical_cols, prefix=["Gen", "Cnt"], dtype=np.int8)
 
     dummy_prefixes = ("Gen_", "Cnt_")
     group_fts = (
@@ -226,7 +231,7 @@ def merge_and_process_moral_data_sql(
         "target": ["Decision_Swerve"],
     }
 
-    df_final[group_fts] = df_final[group_fts].astype(float)
+    df_final[group_fts] = df_final[group_fts].astype(np.float32)
 
     if verbose:
         print(f"Successfully processed {len(df_final)} paired scenarios.")
