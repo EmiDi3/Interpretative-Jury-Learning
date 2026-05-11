@@ -47,6 +47,7 @@ class RunConfig:
     lr: float = 1e-3
     lr_phase2: float = 1e-4
     freeze_encoder_epoch_fraction: float = 2 / 3
+    grad_clip_norm: float = 1.0  # max gradient norm; set to 0.0 to disable clipping
 
     # --- Logging ---
     verbose: bool = True

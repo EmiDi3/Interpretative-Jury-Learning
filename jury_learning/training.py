@@ -177,6 +177,8 @@ def train_moral_model(
             outputs = model(response_fts, user_ids, group_fts).squeeze()
             loss = criterion(outputs, labels)
             loss.backward()
+            if cfg.grad_clip_norm > 0.0:
+                nn.utils.clip_grad_norm_(model.parameters(), max_norm=cfg.grad_clip_norm)
             optimizer.step()
 
             train_loss += loss.item()
