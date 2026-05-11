@@ -121,7 +121,7 @@ def train_moral_model(
         wandb_run = wandb.init(project=cfg.wandb_project, reinit=True)
         wandb.watch(model, log="gradients", log_freq=10)
 
-    criterion = nn.BCELoss()
+    criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(model.parameters(), lr=cfg.lr)
     model.to(device)
 
@@ -182,7 +182,7 @@ def train_moral_model(
             optimizer.step()
 
             train_loss += loss.item()
-            predictions = (outputs > 0.5).float()
+            predictions = (outputs > 0.0).float()
             correct += (predictions == labels).sum().item()
             total += labels.size(0)
 
@@ -198,7 +198,7 @@ def train_moral_model(
                 group_fts = batch["group_features"].to(device)
 
                 outputs = model(response_fts, user_ids, group_fts).squeeze()
-                predictions = (outputs > 0.5).float()
+                predictions = (outputs > 0.0).float()
                 val_correct += (predictions == labels).sum().item()
                 val_total += labels.size(0)
                 val_loss += criterion(outputs, labels).item()
@@ -223,7 +223,7 @@ def train_moral_model(
                     user_ids = batch["ann_id"].to(device)
                     group_fts = batch["group_features"].to(device)
                     outputs = model(response_fts, user_ids, group_fts).squeeze()
-                    s_correct += ((outputs > 0.5).float() == labels).sum().item()
+                    s_correct += ((outputs > 0.0).float() == labels).sum().item()
                     s_total += labels.size(0)
                 split_accs[name] = s_correct / max(s_total, 1)
 

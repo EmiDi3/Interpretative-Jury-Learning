@@ -38,7 +38,7 @@ def accuracy_by_split(
                 labels = batch["label"].to(device)
 
                 outputs = model(res_fts, user_ids, group_fts).view(-1)
-                predictions = (outputs > 0.5).float()
+                predictions = (outputs > 0.0).float()
 
                 correct += (predictions == labels).sum().item()
                 total += labels.size(0)
@@ -92,7 +92,7 @@ def accuracy_by_country(
                 labels = batch["label"].to(device)
 
                 outputs = model(res_fts, user_ids, group_fts).view(-1)
-                predictions = (outputs > 0.5).float()
+                predictions = (outputs > 0.0).float()
                 correct += (predictions == labels).sum().item()
                 total += labels.size(0)
 

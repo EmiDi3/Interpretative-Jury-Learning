@@ -54,7 +54,7 @@ class MoralJuryDCN(nn.Module):
 
         xd = self.deep_layers(x0)
         combined = torch.cat([xl, xd], dim=-1)
-        return torch.sigmoid(self.output_head(combined))
+        return self.output_head(combined)
 
 
 class MoralJuryDCNBaseline(nn.Module):
@@ -111,4 +111,4 @@ class MoralJuryDCNBaseline(nn.Module):
 
         xd = self.deep_layers(x0)
         combined = torch.cat([xl, xd], dim=-1)
-        return torch.sigmoid(self.output_head(combined))
+        return self.output_head(combined)
