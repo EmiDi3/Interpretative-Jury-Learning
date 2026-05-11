@@ -127,25 +127,22 @@ _EXPECTED_COLUMNS = (
 
 
 def _load_scenarios(input_path: str, db_path: str) -> pd.DataFrame:
-    """Load unique scenarios from CSV, generating it from the DB if the CSV doesn't exist."""
+    """Load unique scenarios from CSV, falling back to the DB if headers are missing or the file doesn't exist."""
     if Path(input_path).is_file():
         df = pd.read_csv(input_path)
-        # If the CSV has no header, the first data row becomes column names
-        # (looks like '0', '0.0', '0.0.1', ...). Detect and fix this.
-        if df.columns[0] not in ("Stay_PedPed",) and len(df.columns) == len(_EXPECTED_COLUMNS):
-            df = pd.read_csv(input_path, header=None, names=_EXPECTED_COLUMNS)
-            print(f"Loaded {len(df):,} unique scenarios from {input_path} (no-header CSV, assigned column names)")
-        else:
+        if "Stay_Man" in df.columns:
             print(f"Loaded {len(df):,} unique scenarios from {input_path}")
-        return df
+            return df
+        # Headers are missing — column order can't be assumed, so regenerate from DB
+        print(f"Warning: {input_path!r} has no recognised headers (got {df.columns[0]!r}, ...). Regenerating from DB.")
 
     if not db_path:
         raise FileNotFoundError(
-            f"{input_path!r} not found. Either generate it with take_scenario_data_sql "
-            "or pass --db-path to generate it now."
+            f"{input_path!r} not found or has no headers. "
+            "Pass --db-path to generate it from the database."
         )
 
-    print(f"{input_path!r} not found — generating from {db_path!r} ...")
+    print(f"Generating unique scenarios from {db_path!r} → {input_path!r} ...")
     from jury_learning.data import take_scenario_data_sql
     df = take_scenario_data_sql(db_path, input_path)
     print(f"Generated and saved {len(df):,} unique scenarios to {input_path}")
