@@ -113,33 +113,16 @@ def row_to_prompt(row: pd.Series) -> str:
 # Main
 # ---------------------------------------------------------------------------
 
-_CHARACTER_COLS = [
-    "PedPed", "Barrier", "NumberOfCharacters", "CrossingSignal",
-    "Man", "Woman", "Pregnant", "Stroller", "OldMan", "OldWoman",
-    "Boy", "Girl", "Homeless", "LargeWoman", "LargeMan", "Criminal",
-    "MaleExecutive", "FemaleExecutive", "FemaleAthlete", "MaleAthlete",
-    "FemaleDoctor", "MaleDoctor", "Dog", "Cat",
-]
-_EXPECTED_COLUMNS = (
-    [f"Stay_{c}" for c in _CHARACTER_COLS] +
-    [f"Swerve_{c}" for c in _CHARACTER_COLS]
-)  # 48 columns
-
-
 def _load_scenarios(input_path: str, db_path: str) -> pd.DataFrame:
-    """Load unique scenarios from CSV, falling back to the DB if headers are missing or the file doesn't exist."""
+    """Load unique scenarios from CSV, generating it from the DB if the file doesn't exist."""
     if Path(input_path).is_file():
         df = pd.read_csv(input_path)
-        if "Stay_Man" in df.columns:
-            print(f"Loaded {len(df):,} unique scenarios from {input_path}")
-            return df
-        # Headers are missing — column order can't be assumed, so regenerate from DB
-        print(f"Warning: {input_path!r} has no recognised headers (got {df.columns[0]!r}, ...). Regenerating from DB.")
+        print(f"Loaded {len(df):,} unique scenarios from {input_path}")
+        return df
 
     if not db_path:
         raise FileNotFoundError(
-            f"{input_path!r} not found or has no headers. "
-            "Pass --db-path to generate it from the database."
+            f"{input_path!r} not found. Pass --db-path to generate it from the database."
         )
 
     print(f"Generating unique scenarios from {db_path!r} → {input_path!r} ...")
