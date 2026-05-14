@@ -172,10 +172,14 @@ def train_moral_model(
 
     for epoch in range(cfg.epochs):
         if epoch == freeze_epoch:
-            if cfg.verbose:
-                print("Phase 2: freezing response encoder, lowering LR.")
-            for param in model.response_encoder.parameters():
-                param.requires_grad = False
+            if hasattr(model, "response_encoder"):
+                if cfg.verbose:
+                    print("Phase 2: freezing response encoder, lowering LR.")
+                for param in model.response_encoder.parameters():
+                    param.requires_grad = False
+            else:
+                if cfg.verbose:
+                    print("Phase 2: lowering LR.")
             for g in optimizer.param_groups:
                 g["lr"] = cfg.lr_phase2
 
