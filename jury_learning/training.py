@@ -10,7 +10,7 @@ import torch.optim as optim
 
 from jury_learning.config import RunConfig
 from jury_learning.data import DataBundle, MoralJuryDataset
-from jury_learning.model import MoralJuryDCN, MoralJuryDCNBaseline
+from jury_learning.model import MoralJuryDCN, MoralJuryDCNBaseline, MoralJuryTransformer
 from torch.utils.data import DataLoader
 
 
@@ -78,11 +78,22 @@ def resolve_device(cfg: RunConfig) -> torch.device:
     return torch.device("cpu")
 
 
-def build_model(cfg: RunConfig, bundle: DataBundle) -> MoralJuryDCN | MoralJuryDCNBaseline:
+def build_model(
+    cfg: RunConfig, bundle: DataBundle
+) -> MoralJuryDCN | MoralJuryDCNBaseline | MoralJuryTransformer:
     fd = bundle.feature_dict
-    if cfg.use_user_embedding:
-        return MoralJuryDCN(
-            num_users=bundle.num_users_for_embedding,
+    if cfg.model_type == "transformer":
+        return MoralJuryTransformer(
+            num_char_types=len(fd["response_fts"]) // 2,
+            d_model=cfg.transformer_d_model,
+            num_heads=cfg.transformer_heads,
+            num_layers=cfg.transformer_layers,
+            d_ff=cfg.transformer_ff_dim,
+            dropout=cfg.transformer_dropout,
+            max_count=cfg.transformer_max_count,
+        )
+    if cfg.model_type == "dcn_baseline" or not cfg.use_user_embedding:
+        return MoralJuryDCNBaseline(
             num_response_features=len(fd["response_fts"]),
             num_group_features=len(fd["group_fts"]),
             embed_dim=cfg.embed_dim,
@@ -90,7 +101,8 @@ def build_model(cfg: RunConfig, bundle: DataBundle) -> MoralJuryDCN | MoralJuryD
             num_cross_layers=cfg.num_cross_layers,
             response_encoder_hidden=cfg.response_encoder_hidden,
         )
-    return MoralJuryDCNBaseline(
+    return MoralJuryDCN(
+        num_users=bundle.num_users_for_embedding,
         num_response_features=len(fd["response_fts"]),
         num_group_features=len(fd["group_fts"]),
         embed_dim=cfg.embed_dim,
@@ -147,6 +159,15 @@ def train_moral_model(
     freeze_epoch = int(cfg.epochs * cfg.freeze_encoder_epoch_fraction)
     history = TrainingHistory()
 
+    # For Transformers, use symmetric eval (½[σ(f(A,B)) + 1-σ(f(B,A))]) when configured
+    _is_transformer = isinstance(model, MoralJuryTransformer)
+    _use_symmetric  = _is_transformer and cfg.transformer_symmetric
+
+    def _eval_forward(m, r, u, g):
+        if _use_symmetric:
+            return m.forward_symmetric(r, u, g).squeeze()
+        return m(r, u, g).squeeze()
+
     for epoch in range(cfg.epochs):
         if epoch == freeze_epoch:
             if cfg.verbose:
@@ -197,7 +218,7 @@ def train_moral_model(
                 user_ids = batch["ann_id"].to(device)
                 group_fts = batch["group_features"].to(device)
 
-                outputs = model(response_fts, user_ids, group_fts).squeeze()
+                outputs = _eval_forward(model, response_fts, user_ids, group_fts)
                 predictions = (outputs > 0.0).float()
                 val_correct += (predictions == labels).sum().item()
                 val_total += labels.size(0)
@@ -222,7 +243,7 @@ def train_moral_model(
                     labels = batch["label"].to(device)
                     user_ids = batch["ann_id"].to(device)
                     group_fts = batch["group_features"].to(device)
-                    outputs = model(response_fts, user_ids, group_fts).squeeze()
+                    outputs = _eval_forward(model, response_fts, user_ids, group_fts)
                     s_correct += ((outputs > 0.0).float() == labels).sum().item()
                     s_total += labels.size(0)
                 split_accs[name] = s_correct / max(s_total, 1)

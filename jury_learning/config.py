@@ -36,11 +36,26 @@ class RunConfig:
     )
 
     # --- Model ---
+    # "dcn"         — Deep & Cross Network with per-user embedding (default)
+    # "dcn_baseline"— same DCN without user embedding
+    # "transformer" — scenario-only Transformer encoder (arXiv:2602.03351)
+    model_type: Literal["dcn", "dcn_baseline", "transformer"] = "dcn"
+
+    # DCN knobs (ignored when model_type="transformer")
     embed_dim: int = 128
     hidden_dim: int = 512
     num_cross_layers: int = 3
     response_encoder_hidden: int = 64
-    use_user_embedding: bool = True  # set False for the no-user-ID baseline
+    use_user_embedding: bool = True  # kept for backward compat; model_type overrides
+
+    # Transformer knobs (ignored when model_type != "transformer")
+    transformer_d_model: int = 64    # token embedding dim; must equal d_char+d_card+d_team
+    transformer_heads: int = 2
+    transformer_layers: int = 2
+    transformer_ff_dim: int = 256
+    transformer_dropout: float = 0.1
+    transformer_max_count: int = 20  # max character count for cardinality embedding
+    transformer_symmetric: bool = True  # average f(A,B) and 1-f(B,A) at eval time
 
     # --- Training ---
     epochs: int = 50

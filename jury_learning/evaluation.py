@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 
 from jury_learning.config import RunConfig
 from jury_learning.data import DataBundle, MoralJuryDataset
-from jury_learning.model import MoralJuryDCN
+from jury_learning.model import MoralJuryDCN, MoralJuryTransformer
 from jury_learning.training import build_model, resolve_device
 
 
@@ -37,7 +37,10 @@ def accuracy_by_split(
                 user_ids = batch["ann_id"].to(device)
                 labels = batch["label"].to(device)
 
-                outputs = model(res_fts, user_ids, group_fts).view(-1)
+                if isinstance(model, MoralJuryTransformer):
+                    outputs = model.forward_symmetric(res_fts, user_ids, group_fts).view(-1)
+                else:
+                    outputs = model(res_fts, user_ids, group_fts).view(-1)
                 predictions = (outputs > 0.0).float()
 
                 correct += (predictions == labels).sum().item()
@@ -91,7 +94,10 @@ def accuracy_by_country(
                 user_ids = batch["ann_id"].to(device)
                 labels = batch["label"].to(device)
 
-                outputs = model(res_fts, user_ids, group_fts).view(-1)
+                if isinstance(model, MoralJuryTransformer):
+                    outputs = model.forward_symmetric(res_fts, user_ids, group_fts).view(-1)
+                else:
+                    outputs = model(res_fts, user_ids, group_fts).view(-1)
                 predictions = (outputs > 0.0).float()
                 correct += (predictions == labels).sum().item()
                 total += labels.size(0)
