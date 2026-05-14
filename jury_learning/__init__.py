@@ -3,6 +3,7 @@
 from jury_learning.config import RunConfig
 from jury_learning.data import DataBundle
 from jury_learning.evaluation import accuracy_by_country, accuracy_by_split, split_metrics_table
+from jury_learning.logistic_baseline import LogisticBaselineResult, train_logistic_baseline
 from jury_learning.pipeline import (
     PipelineResult,
     prepare_data,
@@ -30,6 +31,8 @@ __all__ = [
     "DataBundle",
     "TrainingHistory",
     "PipelineResult",
+    "LogisticBaselineResult",
+    "train_logistic_baseline",
     "accuracy_by_country",
     "accuracy_by_split",
     "split_metrics_table",
