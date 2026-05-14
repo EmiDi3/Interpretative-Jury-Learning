@@ -117,28 +117,30 @@ class MoralJuryDCNBaseline(nn.Module):
 
 
 class MoralJuryTransformer(nn.Module):
-    """Scenario-only Transformer encoder replicating arXiv:2602.03351.
+    """Personalized Transformer encoder extending arXiv:2602.03351 with user and group tokens.
 
-    Each of the N character columns for Stay and Swerve becomes one token:
+    Input sequence (51 tokens for 24 character types):
+        [CLS]  [USER]  [GROUP]  [24 Stay tokens]  [24 Swerve tokens]
 
-        e_c = [E_char(char_type_id) ; E_card(count) ; E_team(outcome)]
+    Each scenario token:
+        e_c = [E_char(32) ; E_card(16) ; E_team(16)]   (char type, count, outcome)
 
-    where d_char = d_model//2, d_card = d_model//4, d_team = d_model//4.
+    User and group features are projected to d_model and prepended as prefix
+    tokens so the Transformer attention can mix identity information with
+    scenario content before the CLS representation is read off.
 
-    A learnable [CLS] token is prepended; its final representation feeds a
-    2-layer GELU MLP head that outputs a raw logit (no sigmoid — use
-    BCEWithLogitsLoss during training).
+    The [CLS] output feeds a 2-layer GELU MLP → raw logit.
+    Use BCEWithLogitsLoss during training; threshold at 0.0 at eval.
 
-    At evaluation time, ``forward_symmetric`` averages f(A,B) with 1-f(B,A)
-    to enforce side-invariance, as described in the paper.
-
-    The forward signature matches MoralJuryDCN (accepts user_ids, group_fts)
-    so it is a drop-in replacement; those arguments are ignored.
+    Symmetric eval (transformer_symmetric=True):
+        p = ½[σ(f(A,B)) + 1 − σ(f(B,A))]  — only scenario tokens are flipped.
     """
 
     def __init__(
         self,
         num_char_types: int,
+        num_users: int,
+        num_group_features: int,
         d_model: int = 64,
         num_heads: int = 2,
         num_layers: int = 2,
@@ -154,12 +156,16 @@ class MoralJuryTransformer(nn.Module):
         d_card = d_model // 4
         d_team = d_model // 4
 
-        # Sub-embeddings that compose each token
+        # --- Scenario token embeddings ---
         self.char_embed = nn.Embedding(num_char_types, d_char)
         self.card_embed = nn.Embedding(max_count + 1, d_card)
-        self.team_embed = nn.Embedding(2, d_team)   # 0 = Stay, 1 = Swerve
+        self.team_embed = nn.Embedding(2, d_team)          # 0=Stay, 1=Swerve
 
-        # Learnable [CLS] token
+        # --- User and group prefix tokens ---
+        self.user_embed  = nn.Embedding(num_users, d_model)
+        self.group_proj  = nn.Linear(num_group_features, d_model)
+
+        # --- Learnable [CLS] token ---
         self.cls_token = nn.Parameter(torch.zeros(1, 1, d_model))
         nn.init.trunc_normal_(self.cls_token, std=0.02)
 
@@ -170,7 +176,7 @@ class MoralJuryTransformer(nn.Module):
             dropout=dropout,
             activation="gelu",
             batch_first=True,
-            norm_first=True,   # pre-norm; more stable than post-norm
+            norm_first=True,   # pre-norm for stability
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
@@ -193,19 +199,17 @@ class MoralJuryTransformer(nn.Module):
             elif isinstance(m, nn.Embedding):
                 nn.init.normal_(m.weight, std=0.02)
 
-    def _build_tokens(self, response_fts: torch.Tensor) -> torch.Tensor:
-        """Convert flat response features [B, 2*T] into token sequence [B, 1+2*T, d_model]."""
+    def _scenario_tokens(self, response_fts: torch.Tensor) -> torch.Tensor:
+        """Build scenario token sequence [B, 2*T, d_model] from flat response features."""
         B = response_fts.shape[0]
         T = self.num_char_types
 
         stay_counts   = response_fts[:, :T]
         swerve_counts = response_fts[:, T:]
 
-        char_ids = torch.arange(T, device=response_fts.device).unsqueeze(0).expand(B, -1)
-
+        char_ids    = torch.arange(T, device=response_fts.device).unsqueeze(0).expand(B, -1)
         stay_card   = stay_counts.long().clamp(0, self._max_count)
         swerve_card = swerve_counts.long().clamp(0, self._max_count)
-
         stay_team   = torch.zeros(B, T, dtype=torch.long, device=response_fts.device)
         swerve_team = torch.ones( B, T, dtype=torch.long, device=response_fts.device)
 
@@ -213,24 +217,41 @@ class MoralJuryTransformer(nn.Module):
             return torch.cat(
                 [self.char_embed(char_ids), self.card_embed(card_ids), self.team_embed(team_ids)],
                 dim=-1,
-            )
+            )  # [B, T, d_model]
 
-        tokens = torch.cat([_tok(stay_card, stay_team), _tok(swerve_card, swerve_team)], dim=1)
-        cls = self.cls_token.expand(B, -1, -1)
-        return torch.cat([cls, tokens], dim=1)   # [B, 1+2T, d_model]
+        return torch.cat([_tok(stay_card, stay_team), _tok(swerve_card, swerve_team)], dim=1)
 
-    def _logit(self, response_fts: torch.Tensor) -> torch.Tensor:
-        tokens  = self._build_tokens(response_fts)
-        cls_out = self.transformer(tokens)[:, 0, :]   # [B, d_model]
-        return self.head(cls_out).squeeze(-1)          # [B]
+    def _build_sequence(
+        self,
+        response_fts: torch.Tensor,
+        user_ids: torch.Tensor,
+        group_fts: torch.Tensor,
+    ) -> torch.Tensor:
+        """Full token sequence: [CLS] [USER] [GROUP] [scenario tokens]."""
+        B = response_fts.shape[0]
+        cls_tok   = self.cls_token.expand(B, -1, -1)                    # [B, 1, d]
+        user_tok  = self.user_embed(user_ids).unsqueeze(1)              # [B, 1, d]
+        group_tok = self.group_proj(group_fts).unsqueeze(1)             # [B, 1, d]
+        scene_tok = self._scenario_tokens(response_fts)                 # [B, 2T, d]
+        return torch.cat([cls_tok, user_tok, group_tok, scene_tok], dim=1)  # [B, 3+2T, d]
+
+    def _logit(
+        self,
+        response_fts: torch.Tensor,
+        user_ids: torch.Tensor,
+        group_fts: torch.Tensor,
+    ) -> torch.Tensor:
+        seq     = self._build_sequence(response_fts, user_ids, group_fts)
+        cls_out = self.transformer(seq)[:, 0, :]   # [B, d_model]
+        return self.head(cls_out).squeeze(-1)       # [B]
 
     def forward(
         self,
         response_fts: torch.Tensor,
-        user_ids: torch.Tensor,   # ignored — kept for API compatibility
-        group_fts: torch.Tensor,  # ignored — kept for API compatibility
+        user_ids: torch.Tensor,
+        group_fts: torch.Tensor,
     ) -> torch.Tensor:
-        return self._logit(response_fts).unsqueeze(-1)  # [B, 1]
+        return self._logit(response_fts, user_ids, group_fts).unsqueeze(-1)  # [B, 1]
 
     def forward_symmetric(
         self,
@@ -240,14 +261,13 @@ class MoralJuryTransformer(nn.Module):
     ) -> torch.Tensor:
         """Side-invariant prediction: p = ½[σ(f(A,B)) + 1 − σ(f(B,A))].
 
-        Swaps Stay and Swerve halves of response_fts for the second pass.
-        Use at eval/inference time for best accuracy.
-        Returns a logit (threshold at 0.0, consistent with the rest of the codebase).
+        Only the scenario (Stay/Swerve) halves are flipped; user and group
+        tokens stay the same. Returns a logit (threshold at 0.0).
         """
         T = self.num_char_types
         flipped = torch.cat([response_fts[:, T:], response_fts[:, :T]], dim=1)
 
-        prob = 0.5 * (torch.sigmoid(self._logit(response_fts))
-                      + 1.0 - torch.sigmoid(self._logit(flipped)))
+        prob = 0.5 * (torch.sigmoid(self._logit(response_fts, user_ids, group_fts))
+                      + 1.0 - torch.sigmoid(self._logit(flipped, user_ids, group_fts)))
         prob = prob.clamp(1e-7, 1.0 - 1e-7)
         return torch.log(prob / (1.0 - prob)).unsqueeze(-1)  # logit [B, 1]

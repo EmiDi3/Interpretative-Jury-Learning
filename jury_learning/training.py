@@ -85,6 +85,8 @@ def build_model(
     if cfg.model_type == "transformer":
         return MoralJuryTransformer(
             num_char_types=len(fd["response_fts"]) // 2,
+            num_users=bundle.num_users_for_embedding,
+            num_group_features=len(fd["group_fts"]),
             d_model=cfg.transformer_d_model,
             num_heads=cfg.transformer_heads,
             num_layers=cfg.transformer_layers,
