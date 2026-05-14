@@ -233,7 +233,9 @@ def merge_and_process_moral_data_sql(
         "target": ["Decision_Swerve"],
     }
 
-    df_final[group_fts] = df_final[group_fts].astype(np.float32)
+    # Numeric group features are already float32 from earlier processing.
+    # Dummy columns (Gen_*, Cnt_*) stay as int8 — converting them all to float32 wastes ~6 GB
+    # on the full dataset.  MoralJuryDataset handles the int8→float32 cast per-batch.
 
     if verbose:
         print(f"Successfully processed {len(df_final)} paired scenarios.")
@@ -303,23 +305,58 @@ def create_isolated_test_sets(df: pd.DataFrame, feature_dict: dict, cfg: RunConf
     return df_train_final, df_val, df_new_users, df_new_scenarios, df_new_groups, df_combined
 
 
+# Continuous group features — kept as float32 in the DataFrame.
+# Everything else (Gen_*, Cnt_* dummies) stays int8 and is upcast per-item in __getitem__.
+_NUMERIC_GROUP_FTS: frozenset[str] = frozenset(
+    ["Review_age", "Review_education", "Review_income", "Review_political", "Review_religious"]
+)
+
+
 class MoralJuryDataset(Dataset):
+    """Memory-efficient dataset: character/dummy columns stored as int8; cast to float32 on access.
+
+    Memory layout (per split, full dataset ~4 M training rows, 253 feature cols):
+        _response_np  : int8   [N, 48]  ≈ 200 MB  (was float32 ≈ 800 MB)
+        _group_num_np : float32 [N,  5]  ≈  85 MB
+        _group_dum_np : int8   [N,200]  ≈ 840 MB  (was float32 ≈ 3.4 GB)
+        user_ids      : int64  [N]       ≈  34 MB
+        labels        : float32 [N]      ≈  17 MB
+    Total ≈ 1.2 GB vs ≈ 4.3 GB with the old all-float32 tensors.
+    """
+
     def __init__(self, df: pd.DataFrame, feature_dict: dict):
-        self.response_features = torch.tensor(df[feature_dict["response_fts"]].values, dtype=torch.float32)
-        self.group_features = torch.tensor(df[feature_dict["group_fts"]].values, dtype=torch.float32)
-        labels = torch.tensor(df[feature_dict["target"]].values, dtype=torch.float32).reshape(-1)
-        self.labels = labels
-        self.user_ids = torch.tensor(df["UserID"].values, dtype=torch.long)
+        gf_cols = feature_dict["group_fts"]
+        num_cols = [c for c in gf_cols if c in _NUMERIC_GROUP_FTS]
+        dum_cols = [c for c in gf_cols if c not in _NUMERIC_GROUP_FTS]
+
+        # Compact numpy storage — no copies beyond what pandas already has
+        self._response_np  = df[feature_dict["response_fts"]].to_numpy(dtype=np.int8)
+        self._group_num_np = df[num_cols].to_numpy(dtype=np.float32)
+        self._group_dum_np = df[dum_cols].to_numpy(dtype=np.int8) if dum_cols else np.empty((len(df), 0), dtype=np.int8)
+        self._labels_np    = df[feature_dict["target"]].to_numpy(dtype=np.float32).ravel()
+        self._user_ids_np  = df["UserID"].to_numpy(dtype=np.int64)
+
+        self._n_num = len(num_cols)
+        self._n_dum = len(dum_cols)
+
+        # Keep tensor views for backward-compat utilities (compare_dataset_user_ids, etc.)
+        self.user_ids = torch.from_numpy(self._user_ids_np)
+        self.labels   = torch.from_numpy(self._labels_np)
 
     def __len__(self):
-        return len(self.labels)
+        return len(self._labels_np)
 
     def __getitem__(self, idx):
+        # Build float32 group vector from mixed-dtype storage
+        group = np.empty(self._n_num + self._n_dum, dtype=np.float32)
+        group[: self._n_num] = self._group_num_np[idx]
+        group[self._n_num :] = self._group_dum_np[idx]   # int8 → float32 implicitly
+
         return {
-            "response_features": self.response_features[idx],
-            "group_features": self.group_features[idx],
-            "label": self.labels[idx],
-            "ann_id": self.user_ids[idx],
+            "response_features": torch.from_numpy(self._response_np[idx].astype(np.float32)),
+            "group_features":    torch.from_numpy(group),
+            "label":             self.labels[idx],
+            "ann_id":            self.user_ids[idx],
         }
 
 
