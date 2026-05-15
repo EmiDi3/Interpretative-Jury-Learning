@@ -63,6 +63,7 @@ class RunConfig:
     lr_phase2: float = 1e-4
     freeze_encoder_epoch_fraction: float = 2 / 3
     grad_clip_norm: float = 1.0  # max gradient norm; set to 0.0 to disable clipping
+    weight_decay: float = 1e-5   # L2 regularisation in Adam; prevents embedding magnitude explosion
 
     # --- Logging ---
     verbose: bool = True

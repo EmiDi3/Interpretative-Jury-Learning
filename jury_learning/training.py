@@ -136,7 +136,7 @@ def train_moral_model(
         wandb.watch(model, log="gradients", log_freq=10)
 
     criterion = nn.BCEWithLogitsLoss()
-    optimizer = optim.Adam(model.parameters(), lr=cfg.lr)
+    optimizer = optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     model.to(device)
 
     train_loader = bundle.train_loader
