@@ -187,6 +187,7 @@ def train_moral_model(
         train_loss = 0.0
         correct = 0
         total = 0
+        n_train_batches = 0  # count iterations directly; DataLoader.__len__ can return 0
 
         batches = _maybe_tqdm(
             train_loader,
@@ -209,6 +210,7 @@ def train_moral_model(
             optimizer.step()
 
             train_loss += loss.item()
+            n_train_batches += 1
             predictions = (outputs > 0.0).float()
             correct += (predictions == labels).sum().item()
             total += labels.size(0)
@@ -230,7 +232,7 @@ def train_moral_model(
                 val_total += labels.size(0)
                 val_loss += criterion(outputs, labels).item()
 
-        n_train = max(len(train_loader), 1)
+        n_train = max(n_train_batches, 1)   # actual iterations, not DataLoader.__len__
         n_val = max(len(val_loader), 1)
         epoch_train_loss = train_loss / n_train
         epoch_train_acc = correct / max(total, 1)
