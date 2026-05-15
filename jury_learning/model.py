@@ -46,6 +46,19 @@ class MoralJuryDCN(nn.Module):
 
         self.output_head = nn.Linear(self.input_dim + hidden_dim, 1)
 
+        self._init_weights()
+
+    def _init_weights(self) -> None:
+        # Embedding default is N(0,1) which produces logits in the ±10–20 range at
+        # initialisation, causing a spuriously high loss at epoch 1.  N(0,0.02) keeps
+        # the initial logit magnitude small (≈ 0.1) so loss starts near ln(2) ≈ 0.69.
+        nn.init.normal_(self.user_embed.weight, std=0.02)
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
     def forward(self, response_fts: torch.Tensor, user_ids: torch.Tensor, group_fts: torch.Tensor) -> torch.Tensor:
         x_feat = self.response_encoder(response_fts)
         x0 = torch.cat([x_feat, self.user_embed(user_ids), self.group_encoder(group_fts)], dim=-1)
@@ -102,6 +115,15 @@ class MoralJuryDCNBaseline(nn.Module):
         )
 
         self.output_head = nn.Linear(self.input_dim + hidden_dim, 1)
+
+        self._init_weights()
+
+    def _init_weights(self) -> None:
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
 
     def forward(self, response_fts: torch.Tensor, user_ids: torch.Tensor, group_fts: torch.Tensor) -> torch.Tensor:
         x_feat = self.response_encoder(response_fts)
