@@ -4,6 +4,16 @@ from jury_learning.config import RunConfig
 from jury_learning.data import DataBundle
 from jury_learning.evaluation import accuracy_by_country, accuracy_by_split, split_metrics_table
 from jury_learning.logistic_baseline import LogisticBaselineResult, train_logistic_baseline
+from jury_learning.llm_jury import (
+    JuryResult,
+    analyze_jury_demographics,
+    build_prediction_matrix_from_features,
+    compare_results,
+    find_jury_evolutionary,
+    find_jury_ml,
+    load_llm_responses,
+    load_scenario_features,
+)
 from jury_learning.pipeline import (
     PipelineResult,
     prepare_data,
@@ -33,6 +43,14 @@ __all__ = [
     "PipelineResult",
     "LogisticBaselineResult",
     "train_logistic_baseline",
+    "JuryResult",
+    "analyze_jury_demographics",
+    "build_prediction_matrix_from_features",
+    "compare_results",
+    "find_jury_evolutionary",
+    "find_jury_ml",
+    "load_llm_responses",
+    "load_scenario_features",
     "accuracy_by_country",
     "accuracy_by_split",
     "split_metrics_table",
