@@ -734,19 +734,30 @@ def analyze_jury_demographics(
     user_df: pd.DataFrame,
     sampled_uids: np.ndarray,
 ) -> pd.DataFrame:
-    """Summarise demographic features of selected jurors vs. the full sample.
+    """Summarise demographic features of selected jurors vs. the sampled population.
 
     Parameters
     ----------
-    user_df      : DataFrame of sampled users (one row per user, from _sample_users).
-    sampled_uids : UserIDs in the same order as pred_matrix rows.
+    user_df      : Any user-level DataFrame that contains a ``UserID`` column and
+                   group feature columns (e.g. ``bundle.df_train``).  If it has
+                   multiple rows per user (one per scenario response) it is
+                   deduplicated automatically.
+    sampled_uids : UserIDs in the same order as pred_matrix rows — defines the
+                   population the jury was drawn from.
 
     Returns a DataFrame comparing juror demographics to the full sample mean.
     """
-    uid_to_row = {int(uid): i for i, uid in enumerate(sampled_uids)}
-    juror_rows = [uid_to_row[int(uid)] for uid in jury_result.jury_user_ids
-                  if int(uid) in uid_to_row]
-    juror_df   = user_df.iloc[juror_rows]
+    # Deduplicate to one row per user (df_train has one row per response)
+    if user_df.duplicated("UserID").any():
+        user_df = user_df.groupby("UserID", sort=False).first().reset_index()
+
+    # Population = the users the jury was drawn from (sampled_uids)
+    sampled_set = set(int(u) for u in sampled_uids)
+    pop_df   = user_df[user_df["UserID"].isin(sampled_set)]
+
+    # Jurors = look up by UserID directly
+    juror_set = set(int(u) for u in jury_result.jury_user_ids)
+    juror_df  = pop_df[pop_df["UserID"].isin(juror_set)]
 
     numeric_cols = [c for c in _NUMERIC_GROUP_FTS if c in user_df.columns]
     country_cols = [c for c in user_df.columns if c.startswith("Cnt_")]
@@ -754,27 +765,23 @@ def analyze_jury_demographics(
 
     rows = []
     for col in numeric_cols:
-        rows.append({
-            "feature":       col,
-            "juror_mean":    juror_df[col].mean(),
-            "population_mean": user_df[col].mean(),
-            "delta":         juror_df[col].mean() - user_df[col].mean(),
-        })
+        jm = juror_df[col].mean()
+        pm = pop_df[col].mean()
+        rows.append({"feature": col, "juror_mean": jm,
+                     "population_mean": pm, "delta": jm - pm})
 
     for col in gender_cols:
-        rows.append({
-            "feature":       col.replace("Gen_", "gender="),
-            "juror_mean":    juror_df[col].mean(),
-            "population_mean": user_df[col].mean(),
-            "delta":         juror_df[col].mean() - user_df[col].mean(),
-        })
+        jm = juror_df[col].mean()
+        pm = pop_df[col].mean()
+        rows.append({"feature": col.replace("Gen_", "gender="),
+                     "juror_mean": jm, "population_mean": pm, "delta": jm - pm})
 
-    # Top-5 over-represented countries
+    # Top-10 countries by absolute over/under-representation
     country_deltas = []
     for col in country_cols:
-        d = juror_df[col].mean() - user_df[col].mean()
-        country_deltas.append((col.replace("Cnt_", "country="), d,
-                               juror_df[col].mean(), user_df[col].mean()))
+        jm = juror_df[col].mean()
+        pm = pop_df[col].mean()
+        country_deltas.append((col.replace("Cnt_", "country="), jm - pm, jm, pm))
     country_deltas.sort(key=lambda x: abs(x[1]), reverse=True)
     for name, delta, jm, pm in country_deltas[:10]:
         rows.append({"feature": name, "juror_mean": jm,
