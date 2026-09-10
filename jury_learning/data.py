@@ -115,6 +115,17 @@ def take_scenario_data_sql(db_path: str, output_file_path: str, *, verbose: bool
     return df_unique_scenarios
 
 
+def _mem_note() -> str:
+    """Process RSS and free system memory, when psutil is available."""
+    try:
+        import psutil
+        p = psutil.Process()
+        return (f"  [rss {p.memory_info().rss/2**30:.1f} GiB, "
+                f"free {psutil.virtual_memory().available/2**30:.1f} GiB]")
+    except Exception:
+        return ""
+
+
 def merge_and_process_moral_data_sql(
     db_path: str, subset_size: int | None, *, verbose: bool = True
 ) -> tuple[pd.DataFrame, dict]:
@@ -221,19 +232,46 @@ def merge_and_process_moral_data_sql(
 
         chunks.append(chunk)
         n_rows += len(chunk)
-        if verbose:
-            print(f"  ...{n_rows:,} rows", end="\r")
+        if verbose and len(chunks) % 5 == 0:
+            # Own line, not \r: warnings from the int8 cast interleave and would
+            # overwrite a carriage-returned counter, hiding where a run dies.
+            print(f"  read {n_rows:,} rows ({len(chunks)} chunks){_mem_note()}", flush=True)
 
     conn.close()
 
     if not chunks:
         raise RuntimeError(f"Query returned no rows from {db_path!r} — is the database populated?")
 
+    if verbose:
+        print(f"  read {n_rows:,} rows in {len(chunks)} chunks{_mem_note()}", flush=True)
+
+    # Shrink the two free-text columns before concatenating.
+    #
+    # Held as object dtype they are one Python str per row -- gigabytes on the
+    # full dataset, and concat briefly holds two copies, which is where a
+    # high-memory run dies. Converting each chunk in place first means concat
+    # only ever doubles the compact form.
+    #
+    # Categories are the sorted union actually observed, which is exactly the
+    # order pd.get_dummies() derives from object dtype -- so the generated
+    # Gen_/Cnt_ columns, and therefore the model's feature order, are unchanged.
+    for col in ("Review_gender", "UserCountry3"):
+        seen = set()
+        for ch in chunks:
+            seen.update(ch[col].dropna().unique().tolist())
+        dtype = pd.CategoricalDtype(categories=sorted(seen), ordered=False)
+        for ch in chunks:
+            ch[col] = ch[col].astype(dtype)
+    gc.collect()
+    if verbose:
+        print(f"  compacted text columns{_mem_note()}", flush=True)
+
     df_final = pd.concat(chunks, ignore_index=True, copy=False)
+    chunks.clear()
     del chunks
     gc.collect()
     if verbose:
-        print(f"  ...{n_rows:,} rows read      ")
+        print(f"  concatenated{_mem_note()}", flush=True)
 
     user_encoder = LabelEncoder()
     df_final["UserID"] = user_encoder.fit_transform(df_final["UserID"]) + 1
