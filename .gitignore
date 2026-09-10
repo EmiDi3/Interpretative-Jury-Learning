@@ -1,3 +1,4 @@
+# --- Python ---
 __pycache__/
 *.py[cod]
 .Python
@@ -5,5 +6,31 @@ __pycache__/
 venv/
 .env
 .env.*
+
+# --- OS / editors ---
 .DS_Store
 .ipynb_checkpoints/
+
+# --- Claude Code local state ---
+.claude/settings.local.json
+.claude/worktrees/
+
+# --- Trained model weights (regenerable; moral_jury_dcn.pth is ~120 MB,
+#     over GitHub's 100 MB hard limit). Keep these in Google Drive. ---
+*.pth
+*.pt
+*.ckpt
+
+# --- Large source data (loaded from Google Drive at runtime) ---
+moral_machine.db
+moral_machine.zip
+*.sqlite
+*.sqlite3
+unique_scenarios.csv
+llm_prompts.csv
+
+# --- Experiment outputs ---
+results/
+*.npz
+wandb/
+optuna*.db
