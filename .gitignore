@@ -30,7 +30,11 @@ unique_scenarios.csv
 llm_prompts.csv
 
 # --- Experiment outputs ---
-results/
+# Keep small summaries and figures; ignore the heavy intermediates.
+results/*
+!results/*.png
+!results/*.csv
+!results/*.md
 *.npz
 wandb/
 optuna*.db
