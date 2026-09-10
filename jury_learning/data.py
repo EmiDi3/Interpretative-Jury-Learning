@@ -16,6 +16,10 @@ from torch.utils.data import DataLoader, Dataset
 
 from jury_learning.config import RunConfig
 
+# Rows per SQL read chunk. Bounds the peak memory of the paired-survey read;
+# lower it if the full dataset still OOMs on a small runtime.
+_SQL_CHUNK_ROWS = 500_000
+
 _REQUIRED_MM_TABLES = ("survey", "responses")
 
 
@@ -163,24 +167,6 @@ def merge_and_process_moral_data_sql(
     JOIN responses r1 ON s.ResponseID = r1.ResponseID AND r1.Intervention = 1
     """
 
-    df_final = pd.read_sql_query(sql_query, conn)
-    conn.close()
-
-    # Downcast binary character columns to int8 (they are 0/1) to save memory
-    binary_cols = [f"Stay_{c}" for c in character_cols] + [f"Swerve_{c}" for c in character_cols]
-    df_final[binary_cols] = df_final[binary_cols].astype(np.int8)
-    df_final["Swerve_Saved"] = df_final["Swerve_Saved"].astype(np.int8)
-
-    user_encoder = LabelEncoder()
-    df_final["UserID"] = user_encoder.fit_transform(df_final["UserID"]) + 1
-
-    df_final["Decision_Swerve"] = df_final["Swerve_Saved"].astype(np.int8)
-
-    df_final["Review_age"] = pd.to_numeric(df_final["Review_age"], errors="coerce")
-    df_final["Review_age"] = df_final["Review_age"].fillna(df_final["Review_age"].median())
-    df_final["Review_age"] = df_final["Review_age"].clip(18, 75)
-    df_final["Review_age"] = ((df_final["Review_age"] - 18) / (75 - 18)).astype(np.float32)
-
     edu_map = {
         "underHigh": 0.1,
         "high": 0.3,
@@ -191,7 +177,6 @@ def merge_and_process_moral_data_sql(
         "other": 0.5,
         "default": 0.5,
     }
-    df_final["Review_education"] = df_final["Review_education"].map(edu_map).fillna(0.5).astype(np.float32)
 
     income_map = {
         "under5000": 0.1,
@@ -205,9 +190,59 @@ def merge_and_process_moral_data_sql(
         "above100000": 1.0,
         "default": 0.5,
     }
-    df_final["Review_income"] = df_final["Review_income"].map(income_map).fillna(0.5).astype(np.float32)
-    df_final["Review_political"] = pd.to_numeric(df_final["Review_political"], errors="coerce").fillna(0.5).astype(np.float32)
-    df_final["Review_religious"] = pd.to_numeric(df_final["Review_religious"], errors="coerce").fillna(0.5).astype(np.float32)
+
+    binary_cols = [f"Stay_{c}" for c in character_cols] + [f"Swerve_{c}" for c in character_cols]
+
+    # Read in chunks and shrink each one before it accumulates.
+    #
+    # Reading the whole join at once materialises ~50 columns at int64 plus six
+    # string columns at object dtype. That peak is what OOMs Colab on the full
+    # dataset: the downcasts that follow only ever ran *after* it. Doing them
+    # per chunk keeps the peak at roughly one chunk plus the (already compact)
+    # accumulated result.
+    #
+    # Only row-independent conversions happen here. Review_age is filled from
+    # the median of the whole column, so it stays numeric and is finished after
+    # the concat; every other column fills with a constant and is therefore
+    # identical whether chunked or not.
+    chunks: list[pd.DataFrame] = []
+    n_rows = 0
+    for chunk in pd.read_sql_query(sql_query, conn, chunksize=_SQL_CHUNK_ROWS):
+        chunk[binary_cols] = chunk[binary_cols].astype(np.int8)
+        chunk["Swerve_Saved"] = chunk["Swerve_Saved"].astype(np.int8)
+
+        chunk["Review_education"] = chunk["Review_education"].map(edu_map).fillna(0.5).astype(np.float32)
+        chunk["Review_income"] = chunk["Review_income"].map(income_map).fillna(0.5).astype(np.float32)
+        chunk["Review_political"] = pd.to_numeric(chunk["Review_political"], errors="coerce").fillna(0.5).astype(np.float32)
+        chunk["Review_religious"] = pd.to_numeric(chunk["Review_religious"], errors="coerce").fillna(0.5).astype(np.float32)
+
+        # Median needs the full column — finished after the concat.
+        chunk["Review_age"] = pd.to_numeric(chunk["Review_age"], errors="coerce").astype(np.float32)
+
+        chunks.append(chunk)
+        n_rows += len(chunk)
+        if verbose:
+            print(f"  ...{n_rows:,} rows", end="\r")
+
+    conn.close()
+
+    if not chunks:
+        raise RuntimeError(f"Query returned no rows from {db_path!r} — is the database populated?")
+
+    df_final = pd.concat(chunks, ignore_index=True, copy=False)
+    del chunks
+    gc.collect()
+    if verbose:
+        print(f"  ...{n_rows:,} rows read      ")
+
+    user_encoder = LabelEncoder()
+    df_final["UserID"] = user_encoder.fit_transform(df_final["UserID"]) + 1
+
+    df_final["Decision_Swerve"] = df_final["Swerve_Saved"].astype(np.int8)
+
+    df_final["Review_age"] = df_final["Review_age"].fillna(df_final["Review_age"].median())
+    df_final["Review_age"] = df_final["Review_age"].clip(18, 75)
+    df_final["Review_age"] = ((df_final["Review_age"] - 18) / (75 - 18)).astype(np.float32)
 
     categorical_cols = ["Review_gender", "UserCountry3"]
     df_final = pd.get_dummies(df_final, columns=categorical_cols, prefix=["Gen", "Cnt"], dtype=np.int8)
