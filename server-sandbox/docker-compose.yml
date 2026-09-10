@@ -1,0 +1,26 @@
+services:
+  claude-code:
+    build: .
+    volumes:
+      # Mount your project directory
+      - ../:/home/claude/project
+      # Managed settings (read-only)
+      - ./managed-settings.json:/etc/claude-code/managed-settings.json:ro
+    environment:
+      # Scrub sensitive env vars from subprocesses
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN"
+      # Pass your API key
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+    user: "1000:1000"
+    # Drop all Linux capabilities, add only what sandbox needs
+    cap_drop:
+      - ALL
+    cap_add:
+      - SYS_CHROOT
+    # Prevent privilege escalation
+    security_opt:
+      - no-new-privileges:true
+    # Memory limit to prevent runaway processes
+    mem_limit: 4g
+    stdin_open: true
+    tty: true

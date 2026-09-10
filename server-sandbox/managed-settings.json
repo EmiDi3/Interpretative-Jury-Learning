@@ -1,0 +1,59 @@
+{
+  "defaultMode": "dontAsk",
+  "sandbox": {
+    "enabled": true,
+    "failIfUnavailable": true,
+    "allowUnsandboxedCommands": false
+  },
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(npm test)",
+      "Bash(python *)",
+      "Bash(pip install *)",
+      "Bash(git status)",
+      "Bash(git diff)",
+      "Bash(git log *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(grep -r *)",
+      "Bash(find . *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Edit",
+      "Read"
+    ],
+    "deny": [
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(nc *)",
+      "Bash(ncat *)",
+      "Bash(telnet *)",
+      "Bash(sudo *)",
+      "Bash(su *)",
+      "Bash(ssh *)",
+      "Bash(scp *)",
+      "Bash(rsync *)",
+      "Bash(chmod *)",
+      "Bash(chown *)",
+      "Bash(rm -rf *)",
+      "Bash(mkfs *)",
+      "Bash(dd *)",
+      "Bash(mount *)",
+      "Bash(umount *)",
+      "Bash(systemctl *)",
+      "Bash(service *)",
+      "Bash(crontab *)",
+      "Bash(docker *)",
+      "Bash(kubectl *)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.kube/**)",
+      "Read(/etc/shadow)",
+      "Read(/etc/passwd)"
+    ]
+  }
+}
