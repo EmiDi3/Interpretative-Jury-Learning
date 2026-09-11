@@ -38,3 +38,6 @@ results/*
 *.npz
 wandb/
 optuna*.db
+
+# --- Local, non-research working files (never publish: this repo is public) ---
+Claude outputs/
