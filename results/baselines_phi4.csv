@@ -1,0 +1,9 @@
+baseline,jury_size,agreement,std,note
+majority_class,,0.9047,,LLM swerve rate = 0.905
+best_single_juror,1.0,0.8928,,"oracle, in-sample upper bound"
+random_jury_3,3.0,0.49179500000000004,0.05809371975523688,mean +/- std over 100 draws
+random_jury_5,5.0,0.492527,0.04984901374149744,mean +/- std over 100 draws
+random_jury_7,7.0,0.48748499999999995,0.039406695814290245,mean +/- std over 100 draws
+random_jury_9,9.0,0.481186,0.03607027036216945,mean +/- std over 100 draws
+random_jury_11,11.0,0.48963500000000004,0.030738322579477236,mean +/- std over 100 draws
+full_population,2000.0,0.4707,,all sampled users vote
