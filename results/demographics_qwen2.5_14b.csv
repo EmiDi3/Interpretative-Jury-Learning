@@ -1,0 +1,23 @@
+llm,jury_size,feature,juror_mean,population_mean,delta
+qwen2.5_14b,5,Review_religious,0.35999998450279236,0.2857949733734131,0.07420501112937927
+qwen2.5_14b,5,Review_age,0.17192982137203217,0.12097367644309998,0.05095614492893219
+qwen2.5_14b,5,Review_income,0.3800000250339508,0.4138000011444092,-0.033799976110458374
+qwen2.5_14b,5,Review_education,0.4000000059604645,0.5666500329971313,-0.16665002703666687
+qwen2.5_14b,5,Review_political,0.6000000238418579,0.6021449565887451,-0.002144932746887207
+qwen2.5_14b,5,gender=apache helicopter,0.0,0.0,0.0
+qwen2.5_14b,5,gender=default,0.0,0.0855,-0.0855
+qwen2.5_14b,5,gender=female,0.4,0.2285,0.1715
+qwen2.5_14b,5,gender=male,0.4,0.662,-0.262
+qwen2.5_14b,5,gender=others,0.2,0.024,0.17600000000000002
+qwen2.5_14b,5,country=USA,0.2,0.2085,-0.00849999999999998
+qwen2.5_14b,5,country=BRA,0.0,0.0975,-0.0975
+qwen2.5_14b,5,country=FRA,0.0,0.087,-0.087
+qwen2.5_14b,5,country=DEU,0.0,0.063,-0.063
+qwen2.5_14b,5,country=GBR,0.2,0.052,0.14800000000000002
+qwen2.5_14b,5,country=RUS,0.0,0.0475,-0.0475
+qwen2.5_14b,5,country=JPN,0.0,0.0445,-0.0445
+qwen2.5_14b,5,country=CAN,0.2,0.031,0.169
+qwen2.5_14b,5,country=ITA,0.0,0.028,-0.028
+qwen2.5_14b,5,country=AUS,0.0,0.022,-0.022
+qwen2.5_14b,5,country=ESP,0.0,0.021,-0.021
+qwen2.5_14b,5,country=HUN,0.0,0.017,-0.017
